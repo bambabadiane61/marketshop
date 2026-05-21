@@ -1409,20 +1409,35 @@
     async function loadProductsFromCloud() {
         try {
             const res = await fetch(`${JSONBIN_URL}/latest`, {
-                headers: { 'X-Master-Key': JSONBIN_KEY }
+                headers: {
+                    'X-Master-Key': JSONBIN_KEY,
+                    'X-Bin-Meta': 'false'
+                }
             });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
-            if (data.record && Array.isArray(data.record.products) && data.record.products.length > 0) {
-                products = data.record.products;
+            const prods = data.products || (data.record && data.record.products);
+            if (Array.isArray(prods) && prods.length > 0) {
+                products = prods;
+                localStorage.setItem('kb_products', JSON.stringify(products));
+                return;
             }
         } catch(e) {
-            console.error('Erreur chargement produits cloud:', e);
+            console.warn('JSONBin load failed, using localStorage:', e);
+        }
+        // Fallback : localStorage
+        const saved = localStorage.getItem('kb_products');
+        if (saved) {
+            try { const p = JSON.parse(saved); if (p.length > 0) products = p; } catch(e) {}
         }
     }
 
     async function saveProductsToCloud() {
+        // Sauvegarde locale immédiate
+        localStorage.setItem('kb_products', JSON.stringify(products));
+        // Sauvegarde cloud
         try {
-            await fetch(JSONBIN_URL, {
+            const res = await fetch(JSONBIN_URL, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1430,8 +1445,12 @@
                 },
                 body: JSON.stringify({ products })
             });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return true;
         } catch(e) {
-            console.error('Erreur sauvegarde produits cloud:', e);
+            console.error('JSONBin save failed:', e);
+            showToast('⚠️ Sauvegardé localement seulement');
+            return false;
         }
     }
 
@@ -2694,14 +2713,14 @@
         renderProducts(applyFilterAndSearch());
         renderAdminProducts();
         showToast('⏳ Enregistrement...');
-        saveProductsToCloud().then(() => showToast(T('productSaved')));
+        saveProductsToCloud().then(ok => { if (ok) showToast(T('productSaved')); });
     }
     function deleteProduct(id) {
         if (confirm(T('deleteConfirm'))) {
             products = products.filter(x => x.id !== id);
             renderProducts(applyFilterAndSearch());
             renderAdminProducts();
-            saveProductsToCloud().then(() => showToast(T('productDeleted')));
+            saveProductsToCloud().then(ok => { if (ok) showToast(T('productDeleted')); });
         }
     }
     function cancelProductForm() {
